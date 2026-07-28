@@ -181,7 +181,7 @@
 <body>
 <div class="wrap">
 
-  <div class="brandmark"><div class="sun"></div><span>Ringana Partnerin</span></div>
+  <div class="brandmark"><div class="sun"></div><span>Ringana Partnerin &ndash; Christina Niedermeyer</span></div>
 
   <h1>summer sale<br><em>vorbestellung</em></h1>
   <p class="intro">Wähle in Ruhe deine Favoriten aus und trage die gewünschte Menge ein &mdash; du sparst 20&nbsp;% auf alles. Am Angebot-Tag kümmere ich mich um den Rest, du musst nichts weiter tun.</p>
@@ -218,14 +218,13 @@
         </div>
       </div>
       <div class="summary-actions">
-        <button class="btn btn-ghost" id="printBtn">Drucken</button>
-        <button class="btn btn-primary" id="copyBtn">Bestellung kopieren</button>
+        <button class="btn btn-primary" id="sendBtn">Bestellung senden</button>
       </div>
     </div>
   </div>
 </div>
 
-<div class="toast" id="toast">Bestellung in die Zwischenablage kopiert</div>
+<div class="toast" id="toast">Bestellung gesendet</div>
 
 <script>
 const DATA = [
@@ -394,33 +393,43 @@ function updateSummary(){
   document.getElementById('total-save').textContent = fmt(save);
 }
 
-function buildSummaryText(){
-  const name = document.getElementById('fullname').value.trim() || "(kein Name angegeben)";
+// Google Apps Script Web-App-URL hier eintragen (siehe Anleitung).
+const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwR-a_vPmrqwV06K5hO4IpwZhEudJ1zgT8KMb0pNmQn5QeuZLSS7_z59AMotDnhg8UdWA/exec";
+
+function buildOrderPayload(){
+  const name = document.getElementById('fullname').value.trim();
   const contact = document.getElementById('contact').value.trim();
-  let lines = [];
-  lines.push("Summer Sale Vorbestellung");
-  lines.push("Name: " + name);
-  if(contact) lines.push("Kontakt: " + contact);
-  lines.push("");
+  const items = [];
   let sumNow = 0, sumNormal = 0;
   Object.keys(qtyState).forEach(id => {
     const q = qtyState[id];
     if(q > 0){
-      const {name: pname, reduced} = findItem(id);
-      const lineTotal = reduced * q;
+      const item = findItem(id);
+      const lineTotal = item.reduced * q;
       sumNow += lineTotal;
-      sumNormal += findItem(id).normal * q;
-      lines.push(`${q}x ${pname} — ${fmt(lineTotal)}`);
+      sumNormal += item.normal * q;
+      items.push({
+        kategorie: item.cat,
+        produkt: item.name,
+        menge: q,
+        preis_reduziert: item.reduced,
+        summe: Number(lineTotal.toFixed(2))
+      });
     }
   });
-  if(sumNow === 0){
-    lines.push("(noch keine Produkte ausgewählt)");
-  } else {
-    lines.push("");
-    lines.push("Gesamt: " + fmt(sumNow));
-    lines.push("Ersparnis: " + fmt(sumNormal - sumNow));
-  }
-  return lines.join("\n");
+  return {
+    name, contact, items,
+    gesamt: Number(sumNow.toFixed(2)),
+    ersparnis: Number((sumNormal - sumNow).toFixed(2)),
+    zeitstempel: new Date().toISOString()
+  };
+}
+
+function showToast(msg){
+  const toast = document.getElementById('toast');
+  toast.textContent = msg;
+  toast.classList.add('show');
+  setTimeout(() => toast.classList.remove('show'), 2600);
 }
 
 document.getElementById('categories').addEventListener('click', e => {
@@ -430,24 +439,44 @@ document.getElementById('categories').addEventListener('click', e => {
   updateQty(id, btn.dataset.act === 'plus' ? 1 : -1);
 });
 
-document.getElementById('copyBtn').addEventListener('click', async () => {
-  const text = buildSummaryText();
-  try{
-    await navigator.clipboard.writeText(text);
-  }catch(err){
-    const ta = document.createElement('textarea');
-    ta.value = text;
-    document.body.appendChild(ta);
-    ta.select();
-    document.execCommand('copy');
-    document.body.removeChild(ta);
-  }
-  const toast = document.getElementById('toast');
-  toast.classList.add('show');
-  setTimeout(() => toast.classList.remove('show'), 2200);
-});
+document.getElementById('sendBtn').addEventListener('click', async () => {
+  const name = document.getElementById('fullname').value.trim();
+  const payload = buildOrderPayload();
 
-document.getElementById('printBtn').addEventListener('click', () => window.print());
+  if(!name){
+    showToast("Bitte Namen eintragen");
+    return;
+  }
+  if(payload.items.length === 0){
+    showToast("Bitte mindestens ein Produkt auswählen");
+    return;
+  }
+  if(SCRIPT_URL.includes("PASTE_YOUR")){
+    showToast("Formular ist noch nicht verbunden");
+    return;
+  }
+
+  const btn = document.getElementById('sendBtn');
+  btn.disabled = true;
+  btn.textContent = "Wird gesendet …";
+
+  try{
+    // no-cors: Apps Script sendet keine CORS-Header zurück, daher kann die
+    // Antwort selbst nicht gelesen werden. Der Request kommt trotzdem an.
+    await fetch(SCRIPT_URL, {
+      method: "POST",
+      mode: "no-cors",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify(payload)
+    });
+    showToast("Bestellung gesendet — danke!");
+    btn.textContent = "Gesendet ✓";
+  }catch(err){
+    showToast("Senden fehlgeschlagen, bitte erneut versuchen");
+    btn.disabled = false;
+    btn.textContent = "Bestellung senden";
+  }
+});
 
 buildUI();
 updateSummary();
